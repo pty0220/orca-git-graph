@@ -1,15 +1,31 @@
 import copy
 import json
 import os
+import sqlite3
 import subprocess
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
 from orca_git_graph.app import empty_repo, render_html, watcher_lock
 from orca_git_graph.git_data import collect
-from orca_git_graph.workspace import discover_state, resolve_workspace, WorkspaceError
+from orca_git_graph.workspace import discover_state, read_selection, resolve_workspace, WorkspaceError
+
+READ_ERROR = {"error": "Cannot read Orca's current workspace. Check the state-file setting.", "key": None}
+
+
+def write_state_database(path, documents):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("CREATE TABLE profile_state_documents (domain TEXT PRIMARY KEY NOT NULL,"
+                           " payload TEXT NOT NULL, domain_version INTEGER NOT NULL, revision INTEGER NOT NULL,"
+                           " updated_at INTEGER NOT NULL, content_hash TEXT NOT NULL)")
+        connection.executemany("INSERT INTO profile_state_documents VALUES (?, ?, 1, 1, 0, '')",
+                               [(domain, json.dumps(value)) for domain, value in documents.items()])
+        connection.commit()
 
 
 class WorkspaceTests(unittest.TestCase):
@@ -53,6 +69,96 @@ class WorkspaceTests(unittest.TestCase):
                 with self.assertRaises(WorkspaceError):
                     discover_state()
                 self.assertEqual(discover_state(profile="work").parent.name, "work")
+
+    def test_profile_state_database_is_preferred_over_json(self):
+        with tempfile.TemporaryDirectory() as root:
+            profile = Path(root) / "profiles" / "local-default"
+            profile.mkdir(parents=True)
+            (profile / "orca-data.json").write_text("{}")
+            (profile / "profile-state.db").write_bytes(b"")
+            with patch.dict(os.environ, {"ORCA_USER_DATA_PATH": root}):
+                self.assertEqual(discover_state().name, "profile-state.db")
+                self.assertEqual(discover_state(profile="local-default").name, "profile-state.db")
+
+    def test_stale_json_next_to_a_database_is_not_read(self):
+        stale = copy.deepcopy(self.state)
+        stale["workspaceSession"]["activeWorktreeId"] = "repo::" + str(Path(tempfile.gettempdir()) / "old worktree")
+        with tempfile.TemporaryDirectory() as root:
+            profile = Path(root) / "profiles" / "local-default"
+            write_state_database(profile / "profile-state.db", self.state)
+            (profile / "orca-data.json").write_text(json.dumps(stale))
+            self.assertEqual(read_selection(profile / "orca-data.json")["path"], self.path)
+            self.assertEqual(discover_state(profile / "orca-data.json").name, "profile-state.db")
+
+    def test_mixed_profile_formats_require_explicit_choice(self):
+        with tempfile.TemporaryDirectory() as root:
+            for name, state in (("personal", "orca-data.json"), ("work", "profile-state.db")):
+                path = Path(root) / "profiles" / name / state
+                path.parent.mkdir(parents=True)
+                path.write_bytes(b"")
+            with patch.dict(os.environ, {"ORCA_USER_DATA_PATH": root}):
+                with self.assertRaisesRegex(WorkspaceError, "Multiple Orca profiles found"):
+                    discover_state()
+                self.assertEqual(discover_state(profile="personal").name, "orca-data.json")
+                with self.assertRaisesRegex(WorkspaceError, "has no state file"):
+                    discover_state(profile="missing")
+
+    def test_profile_state_database_worktree(self):
+        with tempfile.TemporaryDirectory() as root:
+            database = Path(root) / "Application Support" / "profile-state.db"
+            write_state_database(database, self.state)
+            self.assertEqual(read_selection(database), {"path": self.path, "key": "repo::" + self.path})
+
+    def test_profile_state_database_folder(self):
+        self.state["workspaceSession"]["activeWorktreeId"] = "folder:notes"
+        self.state["folderWorkspaces"] = [{"id": "notes", "path": self.path}]
+        with tempfile.TemporaryDirectory() as root:
+            database = Path(root) / "profile-state.db"
+            write_state_database(database, self.state)
+            self.assertEqual(read_selection(database), {"path": self.path, "key": "folder:notes"})
+
+    def test_profile_state_database_reads_committed_state_during_a_write(self):
+        other = str(Path(tempfile.gettempdir()) / "another worktree")
+        with tempfile.TemporaryDirectory() as root:
+            database = Path(root) / "profile-state.db"
+            write_state_database(database, self.state)
+            with closing(sqlite3.connect(database)) as orca:
+                orca.execute("BEGIN IMMEDIATE")
+                orca.execute("UPDATE profile_state_documents SET payload = ? WHERE domain = 'workspaceSession'",
+                             (json.dumps({"activeWorktreeId": "repo::" + other}),))
+                self.assertEqual(read_selection(database)["path"], self.path)
+                orca.commit()
+                self.assertEqual(read_selection(database)["path"], other)
+
+    def test_profile_state_database_is_not_changed(self):
+        with tempfile.TemporaryDirectory() as root:
+            database = Path(root) / "profile-state.db"
+            write_state_database(database, self.state)
+            before = database.read_bytes()
+            read_selection(database)
+            self.assertEqual(database.read_bytes(), before)
+
+    def test_unreadable_profile_state_database(self):
+        with tempfile.TemporaryDirectory() as root:
+            other_schema = Path(root) / "other-schema" / "profile-state.db"
+            other_schema.parent.mkdir()
+            with closing(sqlite3.connect(other_schema)) as connection:
+                connection.execute("CREATE TABLE unrelated (id INTEGER)")
+                connection.commit()
+            not_sqlite = Path(root) / "not-sqlite" / "profile-state.db"
+            not_sqlite.parent.mkdir()
+            not_sqlite.write_text("This is not a database.")
+            missing = Path(root) / "missing" / "profile-state.db"
+            for database in (other_schema, not_sqlite, missing):
+                with self.subTest(database.parent.name):
+                    self.assertEqual(read_selection(database), READ_ERROR)
+
+    def test_oversized_profile_state_document_is_rejected(self):
+        with tempfile.TemporaryDirectory() as root:
+            database = Path(root) / "profile-state.db"
+            write_state_database(database, self.state)
+            with patch("orca_git_graph.workspace.MAX_STATE_SIZE", 10):
+                self.assertEqual(read_selection(database), READ_ERROR)
 
 
 class GitTests(unittest.TestCase):
@@ -144,6 +250,26 @@ class InstallationTests(unittest.TestCase):
                 duplicate = subprocess.run([os.sys.executable, str(dest / "run.py"), "watch"], capture_output=True, text=True)
                 self.assertNotEqual(duplicate.returncode, 0)
                 self.assertIn("already running", duplicate.stderr)
+
+    def test_build_follows_a_profile_state_database(self):
+        import install
+        with tempfile.TemporaryDirectory() as root:
+            repository = Path(root) / "example project"
+            repository.mkdir()
+            for args in (["init", "-b", "main"],
+                         ["-c", "user.name=Example Developer", "-c", "user.email=developer@example.com",
+                          "commit", "--allow-empty", "-m", "Initial commit"]):
+                subprocess.run(["git", "-c", "core.hooksPath=" + str(repository / "no-hooks"),
+                                "-C", str(repository), *args], check=True, capture_output=True)
+            database = Path(root) / "profile" / "profile-state.db"
+            write_state_database(database, {"repos": [{"id": "repo", "kind": "git"}],
+                                            "workspaceSession": {"activeWorktreeId": "repo::" + str(repository)}})
+            dest = Path(root) / "runtime"
+            self.assertEqual(install.main(["--no-start", "--install-dir", str(dest), "--orca-state", str(database)]), 0)
+            result = subprocess.run([os.sys.executable, str(dest / "run.py"), "build"], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Updated Git Graph: example project (1 commits)", result.stdout)
+            self.assertIn("Initial commit", (dest / "plugin/panel.html").read_text(encoding="utf-8"))
 
 if __name__ == "__main__":
     unittest.main()

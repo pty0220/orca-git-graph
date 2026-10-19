@@ -34,7 +34,7 @@ No. Keep Git Graph Sync running and restart it after quitting Orca. No operating
 
 ## Which platforms and Orca versions are supported?
 
-Orca 1.4.185 on macOS is the tested desktop target. Windows and Linux desktop integration is experimental. The plugin/state interfaces are version-dependent; a newer Orca release may require an update. SSH and cloud workspaces are not supported in this release.
+Orca 1.4.185 on macOS is the tested desktop target. The sync process also reads the `profile-state.db` workspace state of Orca 1.4.214 and later (checked with 1.4.224). Windows and Linux desktop integration is experimental. The plugin/state interfaces are version-dependent; a newer Orca release may require an update. SSH and cloud workspaces are not supported in this release.
 
 ## Where should an AI assistant start?
 

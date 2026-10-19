@@ -30,7 +30,7 @@ def find_orca():
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--install-dir", type=Path, default=Path.home() / ".local/share/orca-git-graph")
-    parser.add_argument("--orca-state", help="Explicit path to the active profile's orca-data.json")
+    parser.add_argument("--orca-state", help="Explicit path to the active profile's profile-state.db or orca-data.json")
     parser.add_argument("--profile", help="Orca profile directory name, for example local-default")
     parser.add_argument("--no-start", action="store_true", help="Install files without opening a sync terminal")
     args = parser.parse_args(argv)

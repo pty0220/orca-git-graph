@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from .git_data import GitError, collect, fingerprint
-from .workspace import discover_state, read_selection
+from .workspace import current_state_file, discover_state, read_selection
 
 PACKAGE = Path(__file__).resolve().parent
 ROOT = PACKAGE.parent
@@ -119,7 +119,7 @@ def main(argv=None):
             from shutil import which
             print("Python: " + sys.version.split()[0])
             print("Git: " + (which("git") or "NOT FOUND"))
-            print("Orca state: " + config["orca_state_path"])
+            print("Orca state: " + str(current_state_file(config["orca_state_path"])))
             print("Plugin folder: " + str(ROOT / "plugin"))
             selection = read_selection(config["orca_state_path"])
             print("Selection: " + (selection.get("path") or selection.get("error", "unknown")))

@@ -4,7 +4,7 @@ Orca Git Graph adds an interactive Git history graph to the Orca desktop IDE's r
 
 ## 1. Check the requirements
 
-- Orca desktop, tested on version 1.4.185 on macOS.
+- Orca desktop, tested on version 1.4.185 on macOS. The sync process also reads the `profile-state.db` workspace state of Orca 1.4.214 and later (checked with 1.4.224).
 - Python 3.9 or later: `python3 --version`.
 - Git: `git --version`.
 - A local repository already opened in Orca.
@@ -97,8 +97,10 @@ python3 install.py --profile local-default
 Or supply the exact state-file path:
 
 ```sh
-python3 install.py --orca-state "/path/to/orca/profile/orca-data.json"
+python3 install.py --orca-state "/path/to/orca/profile/profile-state.db"
 ```
+
+Use the path of `orca-data.json` for an Orca release that stores the state as JSON.
 
 Default Orca data roots:
 
@@ -108,7 +110,7 @@ Default Orca data roots:
 | Linux | `${XDG_CONFIG_HOME:-~/.config}/orca` |
 | Windows | `%APPDATA%\orca` |
 
-`ORCA_USER_DATA_PATH`, when set, overrides the root. The installer searches profile directories for `orca-data.json`. If multiple profiles exist, it asks for an explicit `--profile` or `--orca-state` argument rather than choosing one silently.
+`ORCA_USER_DATA_PATH`, when set, overrides the root. The installer searches profile directories for `profile-state.db` (Orca 1.4.214 and later) or `orca-data.json` (Orca 1.4.185). If a profile has both files, it uses `profile-state.db`. If multiple profiles exist, it asks for an explicit `--profile` or `--orca-state` argument rather than choosing one silently.
 
 ## Configuration
 
@@ -116,7 +118,7 @@ The installed `config.json` contains:
 
 ```json
 {
-  "orca_state_path": "/path/to/the/selected/profile/orca-data.json",
+  "orca_state_path": "/path/to/the/selected/profile/profile-state.db",
   "limit": 400,
   "git_interval": 10,
   "selection_interval": 0.75
@@ -138,7 +140,7 @@ Change the limit or intervals, then restart Git Graph Sync. `limit` must be 1–
 3. Keep the same Development path registered. If the plugin manifest changes, Orca may request another review.
 4. Start Git Graph Sync if the installer did not start it.
 
-The installer preserves your commit limit and polling intervals. If you originally used a custom profile or installation path, pass those flags again. It refuses to overwrite an unrecognized nonempty directory or update a running watcher.
+The installer preserves your commit limit and polling intervals. It finds the state file again, so a run after an Orca update also changes `orca_state_path` to the new state format. If you originally used a custom profile or installation path, pass those flags again. It refuses to overwrite an unrecognized nonempty directory or update a running watcher.
 
 ## Uninstall
 

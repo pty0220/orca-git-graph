@@ -22,7 +22,7 @@ View branches, merges, tags, authors, and commit details without leaving Orca. S
 
 ## Quick start
 
-**Requirements:** Git, Python 3.9+, and Orca desktop. The desktop integration was tested with **Orca 1.4.185 on macOS**. Windows and Linux support is experimental; their filesystem/installer paths have automated tests, but desktop integration needs validation.
+**Requirements:** Git, Python 3.9+, and Orca desktop. The desktop integration was tested with **Orca 1.4.185 on macOS**. The sync process also reads the `profile-state.db` workspace state of Orca 1.4.214 and later (checked with 1.4.224). Windows and Linux support is experimental; their filesystem/installer paths have automated tests, but desktop integration needs validation.
 
 Run these commands in an **Orca terminal**:
 
@@ -63,7 +63,7 @@ flowchart LR
     D --> E[Orca right-sidebar plugin]
 ```
 
-The sync process reads the selected workspace from the configured Orca profile's local state file. It polls selection every 0.75 seconds and Git references every 10 seconds. On a change, it replaces the generated HTML atomically; Orca's development-plugin watcher reloads the panel. Workspace switching typically takes about 1–3 seconds for small local repositories, with additional Git collection time for larger histories.
+The sync process reads the selected workspace from the configured Orca profile's local state file: `orca-data.json` in Orca 1.4.185, or the `profile-state.db` SQLite database in Orca 1.4.214 and later. It polls selection every 0.75 seconds and Git references every 10 seconds. On a change, it replaces the generated HTML atomically; Orca's development-plugin watcher reloads the panel. Workspace switching typically takes about 1–3 seconds for small local repositories, with additional Git collection time for larger histories.
 
 This is an independent community project. It is not affiliated with Orca, VS Code, or the VS Code Git Graph extension. It uses Orca's experimental plugin panel API and a version-dependent local state-file integration. See [architecture and compatibility](architecture.md).
 

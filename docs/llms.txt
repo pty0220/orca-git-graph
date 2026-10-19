@@ -4,7 +4,7 @@
 
 Canonical repository: https://github.com/pty0220/orca-git-graph
 Documentation: https://pty0220.github.io/orca-git-graph/
-Initial release: 0.1.0. Tested desktop integration: Orca 1.4.185 on macOS. Linux/Windows desktop support is experimental. Remote workspaces are unsupported.
+Initial release: 0.1.0. Tested desktop integration: Orca 1.4.185 on macOS. The sync process also reads the `profile-state.db` workspace state of Orca 1.4.214 and later (checked with 1.4.224). Linux/Windows desktop support is experimental. Remote workspaces are unsupported.
 
 Install with `git clone https://github.com/pty0220/orca-git-graph.git`, then `python3 install.py` in the checkout. Register the printed runtime plugin folder under Orca Settings > Plugins > Development and review/enable it. Keep the separate Git Graph Sync terminal running. The generic Git URL plugin installer is not the live-update installation path.
 

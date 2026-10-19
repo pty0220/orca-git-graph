@@ -1,8 +1,17 @@
-"""Isolate the experimental Orca 1.4.185 state-file integration here."""
+"""Isolate the experimental Orca state integration here.
+
+Orca 1.4.185 keeps the state in orca-data.json. Orca 1.4.214 and later keep it in
+profile-state.db, with one JSON document per former top-level key of orca-data.json. They
+import orca-data.json once and never update it again, so that file becomes stale.
+"""
 import json
 import os
+import sqlite3
 import sys
 from pathlib import Path
+
+STATE_FILES = ("profile-state.db", "orca-data.json")
+MAX_STATE_SIZE = 16 * 1024 * 1024
 
 
 class WorkspaceError(RuntimeError):
@@ -20,18 +29,32 @@ def data_root():
     return Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "orca"
 
 
+def profile_state(directory):
+    return next((directory / name for name in STATE_FILES if (directory / name).is_file()), None)
+
+
+def current_state_file(path):
+    path = Path(path)
+    database = path.with_name("profile-state.db")
+    return database if path.name == "orca-data.json" and database.is_file() else path
+
+
 def discover_state(explicit=None, profile=None):
     if explicit:
         path = Path(explicit).expanduser().resolve()
         if not path.is_file():
             raise WorkspaceError("The supplied Orca state file does not exist.")
-        return path
+        return current_state_file(path)
     root = data_root()
     if profile:
         if Path(profile).name != profile or profile in (".", ".."):
             raise WorkspaceError("Profile must be a directory name, not a path.")
-        return discover_state(root / "profiles" / profile / "orca-data.json")
-    candidates = list((root / "profiles").glob("*/orca-data.json"))
+        state = profile_state(root / "profiles" / profile)
+        if not state:
+            raise WorkspaceError("The selected Orca profile has no state file.")
+        return state.resolve()
+    profiles = sorted(path for path in (root / "profiles").glob("*") if path.is_dir())
+    candidates = [state for state in map(profile_state, profiles) if state]
     if (root / "orca-data.json").is_file():
         candidates.append(root / "orca-data.json")
     if len(candidates) == 1:
@@ -71,13 +94,34 @@ def resolve_workspace(state):
     return {"path": path, "key": key}
 
 
+def load_state_database(path):
+    # mode=ro cannot change Orca's database, and a WAL reader does not block Orca's writes.
+    connection = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True, timeout=1)
+    try:
+        rows = connection.execute(
+            "SELECT domain, CASE WHEN length(payload) <= ? THEN payload END FROM profile_state_documents"
+            " WHERE domain IN ('workspaceSession', 'repos', 'folderWorkspaces')", (MAX_STATE_SIZE,)).fetchall()
+    finally:
+        connection.close()
+    if any(payload is None for _, payload in rows):
+        raise ValueError("State document is too large")
+    return {domain: json.loads(payload) for domain, payload in rows}
+
+
+def load_state(state_path):
+    path = current_state_file(state_path)
+    if path.suffix == ".db":
+        return load_state_database(path)
+    with path.open(encoding="utf-8") as source:
+        # Bound malformed or unexpected files. Never print or copy the state document.
+        raw = source.read(MAX_STATE_SIZE + 1)
+    if len(raw) > MAX_STATE_SIZE:
+        raise ValueError("State document is too large")
+    return json.loads(raw)
+
+
 def read_selection(state_path):
     try:
-        with Path(state_path).open(encoding="utf-8") as source:
-            # Bound malformed or unexpected files. Never print or copy the state document.
-            raw = source.read(16 * 1024 * 1024 + 1)
-        if len(raw) > 16 * 1024 * 1024:
-            raise ValueError("State document is too large")
-        return resolve_workspace(json.loads(raw))
-    except (OSError, ValueError, AttributeError, TypeError):
+        return resolve_workspace(load_state(state_path))
+    except (OSError, ValueError, AttributeError, TypeError, sqlite3.Error):
         return {"error": "Cannot read Orca's current workspace. Check the state-file setting.", "key": None}
